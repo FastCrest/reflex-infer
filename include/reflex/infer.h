@@ -82,6 +82,8 @@ struct KernelSupport {
     bool q4_gemv = false;
     bool q4_mmq_prefill = false;
     bool decode_attention = false;
+    bool paged_decode_attention = false;
+    bool xqa_lite_decode = false;
     bool rope = false;
     bool rmsnorm = false;
     bool kv_convert = false;

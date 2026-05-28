@@ -104,6 +104,19 @@ Quantization roadmap:
 - ownership stays with caller;
 - stream-safety documented per operator.
 
+## Attention Tiers
+
+Attention should be explicit about which runtime path is being used:
+
+- contiguous decode/prefill attention;
+- paged KV-cache decode;
+- Jetson XQA-lite decode.
+
+The current CUDA attention source implements only the contiguous path. Paged
+decode and XQA-lite should become separate APIs and separate capability bits so
+the runtime does not confuse a compatibility path with a specialized serving
+decode engine.
+
 ## Operator Roadmap
 
 Phase 1:
@@ -126,6 +139,8 @@ Phase 3:
 - Orin NX and AGX Orin profile tuning.
 - Phi-4 model-shape validation.
 - More quantization layouts.
+- Paged KV-cache decode API.
+- Jetson XQA-lite decode prototype.
 
 Phase 4:
 

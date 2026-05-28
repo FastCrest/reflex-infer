@@ -59,6 +59,8 @@ server-oriented kernels for constrained edge workloads.
 - `kernels/design-notes.md`: candidate kernel directions.
 - `docs/library-architecture.md`: planned `reflex-infer` library API and
   hardware/model abstraction.
+- `docs/attention-roadmap.md`: contiguous decode, paged decode, and Jetson
+  XQA-lite attention roadmap.
 - `include/reflex/infer.h`: first public C++ API surface consumed by
   `reflex-llm`.
 - `src/dispatch.cpp`: public dispatcher implementation.
