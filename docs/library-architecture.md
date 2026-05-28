@@ -18,8 +18,10 @@ The current repository exports the first build-level API:
 - CMake target: `reflex::infer`
 - Public header: `include/reflex/infer.h`
 - Package config: `reflex-inferConfig.cmake`
+- Q4 dispatcher source: `src/dispatch.cpp`
 
-This target is intentionally an interface stub until real kernels are extracted.
+This target is intentionally CPU/C++ only for now. It defines the dispatcher
+boundary that `reflex-llm` can call before real CUDA kernels are extracted.
 
 ## Initial Target
 
@@ -114,6 +116,7 @@ Phase 2:
 - Capability discovery.
 - Fallback-compatible status codes.
 - Integration option in `reflex-llm`.
+- Q4 dispatcher API for GGUF K-quant GEMV/GEMM calls.
 
 Phase 3:
 

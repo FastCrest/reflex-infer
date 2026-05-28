@@ -1,24 +1,32 @@
 cmake_minimum_required(VERSION 3.20)
 project(reflex-infer VERSION 0.1.0 LANGUAGES CXX)
 
-add_library(reflex_infer INTERFACE)
+add_library(reflex_infer STATIC
+    src/dispatch.cpp
+)
 add_library(reflex::infer ALIAS reflex_infer)
 
-target_compile_features(reflex_infer INTERFACE cxx_std_17)
-target_include_directories(reflex_infer INTERFACE
+target_compile_features(reflex_infer PUBLIC cxx_std_17)
+target_include_directories(reflex_infer PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_compile_definitions(reflex_infer INTERFACE
+target_compile_definitions(reflex_infer PUBLIC
     REFLEX_INFER_VERSION="${PROJECT_VERSION}"
 )
 
-set_target_properties(reflex_infer PROPERTIES EXPORT_NAME infer)
+set_target_properties(reflex_infer PROPERTIES
+    EXPORT_NAME infer
+    POSITION_INDEPENDENT_CODE ON
+)
 
 include(CMakePackageConfigHelpers)
 
 install(TARGETS reflex_infer
     EXPORT reflex-inferTargets
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
 )
 install(DIRECTORY include/ DESTINATION include)
 install(EXPORT reflex-inferTargets
@@ -41,4 +49,3 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/reflex-inferConfigVersion.cmake"
     DESTINATION lib/cmake/reflex-infer
 )
-

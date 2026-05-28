@@ -83,6 +83,98 @@ struct KernelSupport {
     bool kv_convert = false;
 };
 
+using StreamHandle = void*;
+
+struct GemvQuantArgs {
+    void* y = nullptr;
+    const void* weights = nullptr;
+    int ggml_type = 0;
+    const void* x = nullptr;
+    int M = 0;
+    int K = 0;
+    StreamHandle stream = nullptr;
+};
+
+struct GemvQuantAddArgs {
+    void* y = nullptr;
+    const void* weights = nullptr;
+    int ggml_type = 0;
+    const void* x = nullptr;
+    const void* residual = nullptr;
+    int M = 0;
+    int K = 0;
+    StreamHandle stream = nullptr;
+};
+
+struct GemvQuantPairArgs {
+    void* y0 = nullptr;
+    const void* weights0 = nullptr;
+    int ggml_type0 = 0;
+    int M0 = 0;
+    void* y1 = nullptr;
+    const void* weights1 = nullptr;
+    int ggml_type1 = 0;
+    int M1 = 0;
+    const void* x = nullptr;
+    int K = 0;
+    StreamHandle stream = nullptr;
+};
+
+struct GemvQuantTripleArgs {
+    void* y0 = nullptr;
+    const void* weights0 = nullptr;
+    int ggml_type0 = 0;
+    int M0 = 0;
+    void* y1 = nullptr;
+    const void* weights1 = nullptr;
+    int ggml_type1 = 0;
+    int M1 = 0;
+    void* y2 = nullptr;
+    const void* weights2 = nullptr;
+    int ggml_type2 = 0;
+    int M2 = 0;
+    const void* x = nullptr;
+    int K = 0;
+    StreamHandle stream = nullptr;
+};
+
+struct GemmQuantBatchedArgs {
+    void* y = nullptr;
+    const void* weights = nullptr;
+    int ggml_type = 0;
+    const void* x = nullptr;
+    int M = 0;
+    int N = 0;
+    int K = 0;
+    StreamHandle stream = nullptr;
+};
+
+struct GemvQuantF32Args {
+    float* y = nullptr;
+    const void* weights = nullptr;
+    int ggml_type = 0;
+    const void* x = nullptr;
+    int M = 0;
+    int K = 0;
+    StreamHandle stream = nullptr;
+};
+
+using GemvQuantFn = Status (*)(const GemvQuantArgs&);
+using GemvQuantAddFn = Status (*)(const GemvQuantAddArgs&);
+using GemvQuantPairFn = Status (*)(const GemvQuantPairArgs&);
+using GemvQuantTripleFn = Status (*)(const GemvQuantTripleArgs&);
+using GemmQuantBatchedFn = Status (*)(const GemmQuantBatchedArgs&);
+using GemvQuantF32Fn = Status (*)(const GemvQuantF32Args&);
+
+struct Q4Kernels {
+    GemvQuantFn gemv_quant = nullptr;
+    GemvQuantAddFn gemv_quant_add = nullptr;
+    GemvQuantPairFn gemv_quant_pair = nullptr;
+    GemvQuantTripleFn gemv_quant_triple = nullptr;
+    GemmQuantBatchedFn gemm_quant_batched = nullptr;
+    GemvQuantF32Fn gemv_quant_f32 = nullptr;
+};
+
 constexpr const char* version_string() {
     return REFLEX_INFER_VERSION;
 }
@@ -108,5 +200,14 @@ constexpr KernelSupport query_support(
     return {};
 }
 
-}  // namespace reflex::infer
+void register_q4_backend(const Q4Kernels& kernels) noexcept;
+Q4Kernels registered_q4_backend() noexcept;
 
+Status gemv_quant(const GemvQuantArgs& args);
+Status gemv_quant_add(const GemvQuantAddArgs& args);
+Status gemv_quant_pair(const GemvQuantPairArgs& args);
+Status gemv_quant_triple(const GemvQuantTripleArgs& args);
+Status gemm_quant_batched(const GemmQuantBatchedArgs& args);
+Status gemv_quant_f32(const GemvQuantF32Args& args);
+
+}  // namespace reflex::infer
