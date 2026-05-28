@@ -11,9 +11,11 @@ Long-term role: `reflex-infer` should become the reusable CUDA kernel library
 used by `reflex-llm`, similar in spirit to FlashInfer but scoped to NVIDIA
 Jetson devices and edge inference constraints.
 
-Current build status: `reflex-infer` exports a small C++ `reflex::infer`
-CMake target with capability-discovery types and a Q4 dispatcher API. The
-first real CUDA kernels are still to be extracted from `reflex-llm`.
+Current build status: `reflex-infer` exports a `reflex::infer` CMake target
+with capability-discovery types, Q4 GEMV/GEMM kernels, embedding-row dequant,
+and decode/prefill attention kernels. CUDA kernels are built when a CUDA
+compiler is available; otherwise the package builds host stubs for API
+consumers.
 
 ## Core Idea
 
@@ -59,7 +61,8 @@ server-oriented kernels for constrained edge workloads.
   hardware/model abstraction.
 - `include/reflex/infer.h`: first public C++ API surface consumed by
   `reflex-llm`.
-- `src/dispatch.cpp`: current Q4 dispatcher implementation.
+- `src/dispatch.cpp`: public dispatcher implementation.
+- `src/kernels/`: Jetson CUDA kernels and non-CUDA stubs.
 - `benchmarks/`: future benchmark scripts and collected results.
 - `assets/`: future diagrams, plots, and paper figures.
 

@@ -1,4 +1,8 @@
 @PACKAGE_INIT@
 
-include("${CMAKE_CURRENT_LIST_DIR}/reflex-inferTargets.cmake")
+include(CMakeFindDependencyMacro)
+if(@REFLEX_INFER_CONFIG_HAS_CUDA@)
+    find_dependency(CUDAToolkit)
+endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/reflex-inferTargets.cmake")

@@ -19,9 +19,11 @@ The current repository exports the first build-level API:
 - Public header: `include/reflex/infer.h`
 - Package config: `reflex-inferConfig.cmake`
 - Q4 dispatcher source: `src/dispatch.cpp`
+- CUDA sources: `src/kernels/q4_gemm.cu` and `src/kernels/attention.cu`
 
-This target is intentionally CPU/C++ only for now. It defines the dispatcher
-boundary that `reflex-llm` can call before real CUDA kernels are extracted.
+This target builds CUDA kernels when a CUDA compiler is available. On hosts
+without CUDA it builds stubs so API consumers and packaging checks can still
+compile.
 
 ## Initial Target
 
@@ -117,6 +119,7 @@ Phase 2:
 - Fallback-compatible status codes.
 - Integration option in `reflex-llm`.
 - Q4 dispatcher API for GGUF K-quant GEMV/GEMM calls.
+- Physical extraction of Q4 GEMV/GEMM and attention kernels from `reflex-llm`.
 
 Phase 3:
 

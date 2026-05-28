@@ -7,6 +7,10 @@
 #define REFLEX_INFER_VERSION "0.1.0"
 #endif
 
+#ifndef REFLEX_INFER_HAS_CUDA
+#define REFLEX_INFER_HAS_CUDA 0
+#endif
+
 namespace reflex::infer {
 
 enum class Status : std::uint8_t {
@@ -170,12 +174,56 @@ struct GemvQuantF32Args {
     StreamHandle stream = nullptr;
 };
 
+struct DequantEmbeddingRowArgs {
+    void* dst = nullptr;
+    const void* weights = nullptr;
+    const void* weights_device = nullptr;
+    int ggml_type = 0;
+    int token_id = 0;
+    int hidden_dim = 0;
+    StreamHandle stream = nullptr;
+};
+
+struct AttentionDecodeArgs {
+    void* output = nullptr;
+    const void* q = nullptr;
+    const void* k_cache = nullptr;
+    const void* v_cache = nullptr;
+    int n_heads = 0;
+    int n_kv_heads = 0;
+    int head_dim = 0;
+    int seq_len = 0;
+    float scale = 1.0f;
+    bool kv_int8 = false;
+    const float* k_scales = nullptr;
+    const float* v_scales = nullptr;
+    StreamHandle stream = nullptr;
+};
+
+struct AttentionPrefillBatchedArgs {
+    void* output = nullptr;
+    const void* q = nullptr;
+    const void* k_cache = nullptr;
+    const void* v_cache = nullptr;
+    int n_heads = 0;
+    int n_kv_heads = 0;
+    int head_dim = 0;
+    int N = 0;
+    int start_pos = 0;
+    float scale = 1.0f;
+    bool kv_int8 = false;
+    const float* k_scales = nullptr;
+    const float* v_scales = nullptr;
+    StreamHandle stream = nullptr;
+};
+
 using GemvQuantFn = Status (*)(const GemvQuantArgs&);
 using GemvQuantAddFn = Status (*)(const GemvQuantAddArgs&);
 using GemvQuantPairFn = Status (*)(const GemvQuantPairArgs&);
 using GemvQuantTripleFn = Status (*)(const GemvQuantTripleArgs&);
 using GemmQuantBatchedFn = Status (*)(const GemmQuantBatchedArgs&);
 using GemvQuantF32Fn = Status (*)(const GemvQuantF32Args&);
+using DequantEmbeddingRowFn = Status (*)(const DequantEmbeddingRowArgs&);
 
 struct Q4Kernels {
     GemvQuantFn gemv_quant = nullptr;
@@ -184,6 +232,7 @@ struct Q4Kernels {
     GemvQuantTripleFn gemv_quant_triple = nullptr;
     GemmQuantBatchedFn gemm_quant_batched = nullptr;
     GemvQuantF32Fn gemv_quant_f32 = nullptr;
+    DequantEmbeddingRowFn dequant_embedding_row = nullptr;
 };
 
 constexpr const char* version_string() {
@@ -205,10 +254,15 @@ constexpr KernelSupport query_support(
     const HardwareProfile&,
     const ModelShape&,
     const QuantDescriptor&) {
-    // Capability discovery is wired before kernels move out of reflex-llm.
-    // Return no fast paths until each external kernel is implemented and
-    // validated against the runtime fallback.
+#if REFLEX_INFER_HAS_CUDA
+    KernelSupport support{};
+    support.q4_gemv = true;
+    support.q4_mmq_prefill = true;
+    support.decode_attention = true;
+    return support;
+#else
     return {};
+#endif
 }
 
 void register_q4_backend(const Q4Kernels& kernels) noexcept;
@@ -220,5 +274,9 @@ Status gemv_quant_pair(const GemvQuantPairArgs& args);
 Status gemv_quant_triple(const GemvQuantTripleArgs& args);
 Status gemm_quant_batched(const GemmQuantBatchedArgs& args);
 Status gemv_quant_f32(const GemvQuantF32Args& args);
+Status dequant_embedding_row(const DequantEmbeddingRowArgs& args);
+
+Status flash_attention_decode(const AttentionDecodeArgs& args);
+Status flash_attention_prefill_batched(const AttentionPrefillBatchedArgs& args);
 
 }  // namespace reflex::infer
