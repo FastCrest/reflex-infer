@@ -11,6 +11,10 @@ Long-term role: `reflex-infer` should become the reusable CUDA kernel library
 used by `reflex-llm`, similar in spirit to FlashInfer but scoped to NVIDIA
 Jetson devices and edge inference constraints.
 
+Current build status: `reflex-infer` exports a minimal header-only
+`reflex::infer` CMake target with capability-discovery types. The first real
+CUDA kernels are still to be extracted from `reflex-llm`.
+
 ## Core Idea
 
 `reflex-infer` investigates whether inference kernels can be specialized for
@@ -53,8 +57,33 @@ server-oriented kernels for constrained edge workloads.
 - `kernels/design-notes.md`: candidate kernel directions.
 - `docs/library-architecture.md`: planned `reflex-infer` library API and
   hardware/model abstraction.
+- `include/reflex/infer.h`: first public C++ API surface consumed by
+  `reflex-llm`.
 - `benchmarks/`: future benchmark scripts and collected results.
 - `assets/`: future diagrams, plots, and paper figures.
+
+## Build Interface
+
+Use as a sibling checkout from `reflex-llm`:
+
+```bash
+cmake -B build -DREFLEX_LLM_USE_REFLEX_INFER=ON
+```
+
+Or install the package directly:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cmake --install build --prefix /opt/reflex-infer
+```
+
+Installed consumers can use:
+
+```cmake
+find_package(reflex-infer CONFIG REQUIRED)
+target_link_libraries(app PRIVATE reflex::infer)
+```
 
 ## Guardrails
 

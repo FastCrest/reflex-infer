@@ -13,6 +13,14 @@ analogy is FlashInfer, but the scope is narrower:
 `reflex-infer` should be used by `reflex-llm` as an external dependency once the
 kernel API stabilizes.
 
+The current repository exports the first build-level API:
+
+- CMake target: `reflex::infer`
+- Public header: `include/reflex/infer.h`
+- Package config: `reflex-inferConfig.cmake`
+
+This target is intentionally an interface stub until real kernels are extracted.
+
 ## Initial Target
 
 - Device: Jetson Orin Nano 8GB.
