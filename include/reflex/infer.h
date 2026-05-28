@@ -85,9 +85,12 @@ struct KernelSupport {
 
 using StreamHandle = void*;
 
+// `weights` is the runtime-owned logical pointer. `weights_device` is the
+// CUDA-visible alias when the runtime can resolve one for mmap-backed weights.
 struct GemvQuantArgs {
     void* y = nullptr;
     const void* weights = nullptr;
+    const void* weights_device = nullptr;
     int ggml_type = 0;
     const void* x = nullptr;
     int M = 0;
@@ -98,6 +101,7 @@ struct GemvQuantArgs {
 struct GemvQuantAddArgs {
     void* y = nullptr;
     const void* weights = nullptr;
+    const void* weights_device = nullptr;
     int ggml_type = 0;
     const void* x = nullptr;
     const void* residual = nullptr;
@@ -109,10 +113,12 @@ struct GemvQuantAddArgs {
 struct GemvQuantPairArgs {
     void* y0 = nullptr;
     const void* weights0 = nullptr;
+    const void* weights0_device = nullptr;
     int ggml_type0 = 0;
     int M0 = 0;
     void* y1 = nullptr;
     const void* weights1 = nullptr;
+    const void* weights1_device = nullptr;
     int ggml_type1 = 0;
     int M1 = 0;
     const void* x = nullptr;
@@ -123,14 +129,17 @@ struct GemvQuantPairArgs {
 struct GemvQuantTripleArgs {
     void* y0 = nullptr;
     const void* weights0 = nullptr;
+    const void* weights0_device = nullptr;
     int ggml_type0 = 0;
     int M0 = 0;
     void* y1 = nullptr;
     const void* weights1 = nullptr;
+    const void* weights1_device = nullptr;
     int ggml_type1 = 0;
     int M1 = 0;
     void* y2 = nullptr;
     const void* weights2 = nullptr;
+    const void* weights2_device = nullptr;
     int ggml_type2 = 0;
     int M2 = 0;
     const void* x = nullptr;
@@ -141,6 +150,7 @@ struct GemvQuantTripleArgs {
 struct GemmQuantBatchedArgs {
     void* y = nullptr;
     const void* weights = nullptr;
+    const void* weights_device = nullptr;
     int ggml_type = 0;
     const void* x = nullptr;
     int M = 0;
@@ -152,6 +162,7 @@ struct GemmQuantBatchedArgs {
 struct GemvQuantF32Args {
     float* y = nullptr;
     const void* weights = nullptr;
+    const void* weights_device = nullptr;
     int ggml_type = 0;
     const void* x = nullptr;
     int M = 0;

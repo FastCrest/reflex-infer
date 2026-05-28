@@ -136,6 +136,8 @@ Phase 4:
 - model shape from GGUF metadata;
 - quantization descriptors from loaded tensor metadata;
 - input/output tensor pointers;
+- runtime-owned quantized weight pointers and CUDA-visible aliases for
+  mmap-backed weights;
 - KV-cache pointers and layout metadata;
 - workspace pointer and size;
 - CUDA stream.
