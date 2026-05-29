@@ -100,3 +100,7 @@ target_link_libraries(app PRIVATE reflex::infer)
 - Compare against strong baselines: FlashInfer where supported, TensorRT-LLM,
   `tensorrt-edge-llm`, `llama.cpp` CUDA, PyTorch/eager or compiled baselines,
   and any Jetson-specific NVIDIA sample where relevant.
+
+## License
+
+Business Source License 1.1. See [LICENSE](LICENSE).
