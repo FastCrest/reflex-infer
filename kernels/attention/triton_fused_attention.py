@@ -43,12 +43,14 @@ triton = maybe_triton()
 if triton is not None:
     import triton.language as tl
 
+    from .._rocm import autotune_cap as _rocm_autotune_cap
+
     # ------------------------------------------------------------------
     # Autotune configs
     # ------------------------------------------------------------------
     # Tuned on Ampere A100 / Hopper H100 / RTX 4090; ROCm picks a subset via
     # the constraint that BLOCK_N <= 128 (LDS budget on MI300 is tighter).
-    _ATTN_CONFIGS = [
+    _BASE_ATTN_CONFIGS = [
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64},
             num_warps=4,
@@ -76,6 +78,17 @@ if triton is not None:
         ),
     ]
 
+    # On ROCm we drop any config whose BLOCK_N exceeds the per-generation
+    # LDS cap from ``kernels/_rocm/autotune_cap``. On non-ROCm the cap is a
+    # large sentinel so every config survives. This is the wiring the
+    # previous README claimed but didn't actually perform.
+    _ATTN_BLOCK_N_CAP = _rocm_autotune_cap()
+    _ATTN_CONFIGS = [
+        cfg
+        for cfg in _BASE_ATTN_CONFIGS
+        if cfg.kwargs.get("BLOCK_N", 0) <= _ATTN_BLOCK_N_CAP
+    ] or _BASE_ATTN_CONFIGS  # keep at least one config even if cap is degenerate
+
     @triton.autotune(configs=_ATTN_CONFIGS, key=["S_Q", "S_K", "D"])
     @triton.jit
     def _fused_attention_kernel(
@@ -93,6 +106,9 @@ if triton is not None:
         S_Q: tl.constexpr,
         S_K: tl.constexpr,
         D: tl.constexpr,
+        # Heads layout (constexpr so the compiler picks up the divisions).
+        H: tl.constexpr,
+        H_KV: tl.constexpr,
         # GQA / MQA: number of Q heads sharing one K/V head.
         HEAD_REPEAT: tl.constexpr,
         # Block sizes (autotuned).
@@ -102,31 +118,29 @@ if triton is not None:
         IS_CAUSAL: tl.constexpr,
         HAS_MASK: tl.constexpr,
         MASK_BIAS,
-        smb_b: tl.constexpr, smb_h: tl.constexpr,
-        smb_q: tl.constexpr, smb_k: tl.constexpr,
+        smb_b, smb_h, smb_q, smb_k,
     ):
-        # Grid: (S_Q // BLOCK_M, B * H)
+        # Single-grid launch: (cdiv(S_Q, BLOCK_M), B * H). Program 1 encodes
+        # the flat (b, h) program index; we decode it here and compute the
+        # K/V head with the GQA group division so the host never has to
+        # repeat_interleave K/V.
         start_m = tl.program_id(0)
-        off_bh = tl.program_id(1)
+        pid_bh = tl.program_id(1)
 
-        # Decode batch index and head index from off_bh. We use cdiv on H so
-        # that the kernel works for H not divisible by 1 (trivially), but the
-        # caller is expected to launch with batch * heads programs.
-        H = tl.num_programs(1) // 1  # placeholder; H derived from strides
-        # In practice we pass H via the launch grid size; recover by dividing
-        # off_bh into (b, h). The host code passes B * H so we compute below.
-        # We can't easily get B / H at JIT time without an extra constexpr,
-        # so we receive them via the strides: head stride = D * S etc.
-        # Simpler: we just iterate via program_id and use Q's batch / head
-        # strides directly with the off_bh as a flat program index after
-        # multiplying by sq_h.
-        # NOTE: host computes b = off_bh // H, h = off_bh % H and writes
-        # the pointer arithmetic by passing pre-shifted Q / K / V base
-        # pointers. To keep this kernel simple we adopt that convention:
-        # the host adds the (b, h) offset to each pointer before launch.
-        #
-        # Therefore here we treat Q / K / V / O as pointers to a single
-        # [S_q, D] (Q, O) and [S_k, D] (K, V) slice.
+        b = pid_bh // H
+        h = pid_bh % H
+        h_kv = h // HEAD_REPEAT  # equals h when HEAD_REPEAT == 1.
+
+        # Shift the per-tensor base pointers by (b, h) on the kernel side so
+        # all subsequent offset math is against a single [S, D] slice. Q and
+        # O are indexed by the Q-side head h; K and V by the K/V-side head
+        # h_kv (this is where the in-kernel GQA happens).
+        Q = Q + b * sq_b + h * sq_h
+        O = O + b * so_b + h * so_h
+        K = K + b * sk_b + h_kv * sk_h
+        V = V + b * sv_b + h_kv * sv_h
+        if HAS_MASK:
+            MASK_BIAS = MASK_BIAS + b * smb_b + h * smb_h
 
         # Q tile pointers ----------------------------------------------------
         offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -280,13 +294,10 @@ def triton_fused_attention(
     v = v.contiguous()
     out = torch.empty_like(q)
 
-    # GQA: expand K/V along the head axis so the kernel sees one K/V head per
-    # Q head. We use expand+contiguous which allocates; a fully fused GQA
-    # path would dodge this allocation but adds 4 kernel variants. Acceptable
-    # for v1; tracked as a follow-up.
-    if head_repeat > 1:
-        k = k.repeat_interleave(head_repeat, dim=1).contiguous()
-        v = v.repeat_interleave(head_repeat, dim=1).contiguous()
+    # GQA is now handled INSIDE the kernel via `h_kv = h // HEAD_REPEAT`,
+    # so we no longer repeat_interleave K/V on the host. This removes a
+    # B*H*S_kv*D allocation + copy at every call and was a measurable
+    # win at long context.
 
     has_mask = attn_mask is not None
     if has_mask:
@@ -300,12 +311,14 @@ def triton_fused_attention(
     else:
         smb_b = smb_h = smb_q = smb_k = 0
 
-    # Each (batch, head) is an independent attention problem; we launch one
-    # program per Q tile per (batch, head). The kernel itself treats the Q /
-    # K / V / O pointers as pointing at a single [S_q, D] slice for clarity;
-    # we do the (b, h) offset on the host side here.
-    grid_m = lambda meta: (
+    # Single-grid launch: one program per (Q-tile, b*H + h). This replaces the
+    # previous Python-side `for b, for h` loop that was launching B*H separate
+    # grids and paying dispatch overhead per launch. With the new layout the
+    # kernel decodes (b, h, h_kv) internally and indexes Q/K/V/O via their
+    # batch + head strides directly.
+    grid = lambda meta: (
         triton.cdiv(S_q, meta["BLOCK_M"]),
+        B * H,
     )
 
     sq_b, sq_h, sq_s, sq_d = q.stride()
@@ -313,28 +326,23 @@ def triton_fused_attention(
     sv_b, sv_h, sv_s, sv_d = v.stride()
     so_b, so_h, so_s, so_d = out.stride()
 
-    for b in range(B):
-        for h in range(H):
-            q_ptr = q[b, h]
-            k_ptr = k[b, h]
-            v_ptr = v[b, h]
-            o_ptr = out[b, h]
-            mask_ptr = attn_mask[b, h] if has_mask else q  # dummy
-            _fused_attention_kernel[grid_m](
-                q_ptr, k_ptr, v_ptr, o_ptr,
-                float(sm_scale),
-                # Q strides for the single [S_q, D] slice we pass.
-                0, 0, sq_s, sq_d,
-                0, 0, sk_s, sk_d,
-                0, 0, sv_s, sv_d,
-                0, 0, so_s, so_d,
-                S_q, S_k, D,
-                head_repeat,
-                IS_CAUSAL=is_causal,
-                HAS_MASK=has_mask,
-                MASK_BIAS=mask_ptr,
-                smb_b=0, smb_h=0, smb_q=smb_q, smb_k=smb_k,
-            )
+    mask_tensor = attn_mask if has_mask else q  # dummy when unused
+
+    _fused_attention_kernel[grid](
+        q, k, v, out,
+        float(sm_scale),
+        sq_b, sq_h, sq_s, sq_d,
+        sk_b, sk_h, sk_s, sk_d,
+        sv_b, sv_h, sv_s, sv_d,
+        so_b, so_h, so_s, so_d,
+        S_q, S_k, D,
+        H, Hk,
+        head_repeat,
+        IS_CAUSAL=is_causal,
+        HAS_MASK=has_mask,
+        MASK_BIAS=mask_tensor,
+        smb_b=smb_b, smb_h=smb_h, smb_q=smb_q, smb_k=smb_k,
+    )
 
     return out
 

@@ -58,6 +58,16 @@ if triton is not None:
         if row >= M:
             return
 
+        # In causal mode, the host has validated that M % N == 0 and the
+        # input is square [..., N, N]. The query position is `row % N`
+        # (not the flat `row`), so each batch element's S queries map
+        # cleanly back into [0, N). For non-square inputs the host raises
+        # before we get here.
+        if IS_CAUSAL:
+            q_pos = row % N
+        else:
+            q_pos = row  # unused
+
         # Pass 1: online running max + denominator.
         m_i = float("-inf")
         l_i = 0.0
@@ -70,7 +80,7 @@ if triton is not None:
                 other=float("-inf"),
             ).to(tl.float32)
             if IS_CAUSAL:
-                x = tl.where(offs_n <= row, x, float("-inf"))
+                x = tl.where(offs_n <= q_pos, x, float("-inf"))
             m_ij = tl.max(x, axis=0)
             m_new = tl.maximum(m_i, m_ij)
             alpha = tl.exp(m_i - m_new)
@@ -88,7 +98,7 @@ if triton is not None:
                 other=float("-inf"),
             ).to(tl.float32)
             if IS_CAUSAL:
-                x = tl.where(offs_n <= row, x, float("-inf"))
+                x = tl.where(offs_n <= q_pos, x, float("-inf"))
             if IS_LOG:
                 y = x - m_i - tl.log(l_i)
             else:
@@ -119,13 +129,39 @@ def triton_online_softmax(
     attention kernel (see ``attention/triton_fused_attention.py``); this
     standalone kernel exists for use cases that softmax an externally
     materialized tensor (model heads, retrieval scores).
+
+    Contract for ``is_causal=True``:
+        The kernel treats ``row`` (the flattened row index) as the query
+        position and ``col`` as the key position. That mapping is only
+        meaningful when the input is a SQUARE attention score matrix of
+        shape ``[..., S, S]``. We therefore reject non-square inputs in
+        causal mode rather than silently producing wrong masking. For
+        attention-score softmax over non-square shapes, use the fused
+        attention kernel (which masks per (q_pos, k_pos) correctly).
     """
     if triton is None:
         raise RuntimeError("triton not importable")
     orig_shape = x.shape
     N = x.shape[-1]
+    if is_causal:
+        if x.dim() < 2 or x.shape[-2] != x.shape[-1]:
+            raise ValueError(
+                "causal mode requires square input (last two dims equal); "
+                f"got {tuple(x.shape)}. The flattened-row causal mapping "
+                "is only well-defined for square attention scores."
+            )
     x_2d = x.reshape(-1, N).contiguous()
     M = x_2d.shape[0]
+    if is_causal:
+        # After reshape M = prod(leading_dims) * S. The kernel's causal mask
+        # uses `row < N` (i.e. `row` modulo S == query position). We enforce
+        # that the leading-dim flattening preserves the row==query mapping
+        # by validating M is a multiple of N.
+        if M % N != 0:
+            raise ValueError(
+                "causal mode requires M % N == 0 after flattening; "
+                f"got M={M}, N={N}."
+            )
     y = torch.empty_like(x_2d)
 
     _online_softmax_kernel[(M,)](
@@ -145,9 +181,18 @@ def torch_reference_softmax(
     is_causal: bool = False,
     log: bool = False,
 ) -> torch.Tensor:
-    """Reference path via torch.nn.functional."""
+    """Reference path via torch.nn.functional.
+
+    Causal mode follows the same square-input contract as
+    ``triton_online_softmax``: rejects non-square last-two-dims.
+    """
     import torch.nn.functional as F
     if is_causal:
+        if x.dim() < 2 or x.shape[-2] != x.shape[-1]:
+            raise ValueError(
+                "causal mode requires square input (last two dims equal); "
+                f"got {tuple(x.shape)}."
+            )
         N = x.shape[-1]
         mask = torch.triu(
             torch.full((N, N), float("-inf"), device=x.device, dtype=x.dtype),

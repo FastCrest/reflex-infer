@@ -70,3 +70,28 @@ def test_softmax_causal_parity():
     ref = torch_reference_softmax(x, is_causal=True)
     out = online_softmax(x, is_causal=True, backend="triton")
     torch.testing.assert_close(out, ref, atol=1e-5, rtol=1e-5)
+
+
+def test_softmax_causal_multibatch_parity():
+    """Causal mode on batched [B*H, S, S] scores matches per-batch reference."""
+    if not has_triton():
+        pytest.skip("triton not importable")
+    torch.manual_seed(3)
+    B, H, S = 2, 4, 64
+    x = torch.randn(B * H, S, S, dtype=torch.float32, device="cuda")
+    ref = torch_reference_softmax(x, is_causal=True)
+    out = online_softmax(x, is_causal=True, backend="triton")
+    torch.testing.assert_close(out, ref, atol=1e-5, rtol=1e-5)
+
+
+def test_softmax_causal_rejects_non_square():
+    """Causal mode raises on non-square input rather than silently masking
+    wrong positions."""
+    if not has_triton():
+        pytest.skip("triton not importable")
+    x = torch.randn(8, 32, 64, dtype=torch.float32, device="cuda")
+    with pytest.raises(ValueError, match="causal mode requires square"):
+        online_softmax(x, is_causal=True, backend="triton")
+    with pytest.raises(ValueError, match="causal mode requires square"):
+        # The torch reference enforces the same contract.
+        torch_reference_softmax(x, is_causal=True)
