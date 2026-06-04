@@ -101,6 +101,45 @@ target_link_libraries(app PRIVATE reflex::infer)
   `tensorrt-edge-llm`, `llama.cpp` CUDA, PyTorch/eager or compiled baselines,
   and any Jetson-specific NVIDIA sample where relevant.
 
+## Python kernel library
+
+In addition to the standalone CUDA targets above, `reflex-infer` ships an
+early cross-vendor Python kernel library used by Reflex Cloud's
+deterministic-mode runtime. Honest status: this is a v1 kernel set with
+on-going optimization work. Some kernels currently match or trail torch
+baselines on specific shape ranges (`torch.nn.functional` routes to
+FlashAttention-2 on Ampere+, which is a strong baseline). See
+[KERNELS.md](KERNELS.md) for per-kernel notes on where each path is
+expected to win, match, or trail torch / SDPA. We add benchmark JSON for
+each shape sweep we run; if a kernel does not beat the torch baseline we
+document that rather than hide it.
+
+Public surface:
+
+```python
+from kernels.attention import fused_attention
+from kernels.kv_cache import kv_paged_append, kv_paged_lookup, kv_paged_scatter
+from kernels.fused_linear_norm import fused_linear_layernorm, fused_linear_rmsnorm
+from kernels.softmax import online_softmax
+from kernels.rope import apply_rope, apply_rope_, build_rope_tables
+```
+
+Every kernel has a Triton primary path (NVIDIA + AMD via Triton's hip
+backend) and a CUDA C++ reference loaded lazily via
+`torch.utils.cpp_extension`. Apple is covered for the softmax kernel via
+MPS and Core ML (see `kernels/_mps/`). Parity tests are in `tests/`, with
+the GPU tests gated behind `@pytest.mark.gpu`.
+
+Run the benchmarks:
+
+```bash
+python -m benchmark.run_all --warmup 5 --iters 30
+# JSON + Markdown output in benchmark/results/
+```
+
+License for the Python kernel library files: Apache-2.0 (per-file SPDX
+header). The existing CMake build (above) remains under BSL 1.1 as before.
+
 ## License
 
 Business Source License 1.1. See [LICENSE](LICENSE).

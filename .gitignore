@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# Torch extension JIT cache (per-machine).
+~/.cache/torch_extensions/
+
+# Benchmark output (machine-specific; uncomment if you want to commit a snapshot).
+# benchmark/results/*.json
+# benchmark/results/*.md
+# !benchmark/results/README.md
+
+# Local IDE files.
+.vscode/
+.idea/
+*.swp

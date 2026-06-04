@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reflex-infer"
+version = "0.1.0"
+description = "Cross-vendor production kernel library for low-latency inference (Triton + CUDA)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "FastCrest" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.5",
+    "triton>=3.0; platform_system == 'Linux'",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-xdist>=3.5",
+    "ruff>=0.4",
+]
+benchmark = [
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+]
+rocm = [
+    # ROCm install of torch and triton is handled out-of-band; this extra
+    # exists so users can ``pip install reflex-infer[rocm]`` and get
+    # everything except the platform-specific torch wheel.
+]
+mps = [
+    # CoreML / MPS port deps; mostly stdlib but pinning here makes intent
+    # explicit for the softmax port (kernels/_mps/).
+]
+
+[project.urls]
+Homepage = "https://github.com/fastcrest/reflex-infer"
+Repository = "https://github.com/fastcrest/reflex-infer"
+
+[tool.setuptools.packages.find]
+include = ["kernels*", "benchmark*"]
+exclude = ["tests*", "experiments*", "research*", "paper*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+markers = [
+    "gpu: requires a CUDA-capable GPU to run",
+    "triton: requires triton importable",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "W"]
+ignore = [
+    "E501",  # line length handled by formatter
+    "E731",  # lambdas in benchmarks are intentional (lazy launch grid)
+    "E741",  # 'l' is a standard symbol in attention math
+]
