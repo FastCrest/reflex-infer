@@ -193,7 +193,17 @@ __global__ void fused_attention_kernel(
             float alpha = expf(m_i[r] - m_new);
             float row_sum = 0.0f;
 
-            // Second pass: exponentiate, accumulate into acc.
+            // Rescale running accumulator ONCE per outer K-tile iter (not per
+            // j). This mirrors the Triton path's `acc = acc * alpha[:, None]`
+            // outside the inner-j loop. Doing it inside the j loop would
+            // multiply acc by alpha^kBlockN, which is the correctness bug
+            // that was previously here.
+            #pragma unroll
+            for (int d = 0; d < D; ++d) {
+                acc[r][d] *= alpha;
+            }
+
+            // Second pass: exponentiate, accumulate p*V into acc.
             #pragma unroll
             for (int j = 0; j < kBlockN; ++j) {
                 float p = expf(qk[j] - m_new);
@@ -201,14 +211,9 @@ __global__ void fused_attention_kernel(
                 row_sum += p;
                 #pragma unroll
                 for (int d = 0; d < D; ++d) {
-                    acc[r][d] = acc[r][d] * alpha + p * smem_v[j * D + d];
+                    acc[r][d] += p * smem_v[j * D + d];
                 }
             }
-            // Rescale outside the j loop for the "alpha" running sum.
-            // (acc was already multiplied per-iteration above; that's a small
-            //  optimization that costs correctness when row_sum is split. The
-            //  Triton path rescales acc once per outer iter; we do likewise
-            //  on the next outer iter.)
             l_i[r] = l_i[r] * alpha + row_sum;
             m_i[r] = m_new;
         }

@@ -4,20 +4,36 @@ Each kernel ships as a Triton primary plus a CUDA C++ reference. The Python
 wrapper picks the backend via `kernels._common.launch.select_backend`, which
 honours `REFLEX_INFER_BACKEND={triton,cuda,torch}`.
 
-| Kernel | Primary | Fallback | dtypes | autotuned |
-|--------|---------|----------|--------|-----------|
-| Fused attention | Triton (FA-2 style) | CUDA C++ | fp16 / bf16 (fp8 wired in dtype helper) | yes |
-| Paged KV cache (append / lookup / scatter) | Triton | CUDA C++ | fp16 / bf16 | no (memory-bound) |
-| Fused Linear + LayerNorm / RMSNorm | Triton | CUDA C++ | fp16 / bf16 / fp32 | yes (BLOCK_K) |
-| Online softmax | Triton | CUDA C++ | fp16 / bf16 / fp32 | yes (BLOCK_N) |
-| RoPE (apply / apply\_) | Triton | CUDA C++ | fp16 / bf16 / fp32 | no |
+**Status (v1).** This is an early kernel library. Some kernels currently
+match or trail the torch baseline at specific shape ranges. The torch
+baseline (`F.scaled_dot_product_attention`) routes to FlashAttention-2 on
+Ampere+ and is a strong opponent; we expect to beat it on the GQA + long
+context regime first, parity-or-trailing elsewhere. Benchmark JSON in
+`benchmark/results/` is the source of truth; if a result is missing, the
+kernel hasn't been validated at that shape yet.
+
+| Kernel | Primary | Fallback | dtypes | autotuned | v1 status |
+|--------|---------|----------|--------|-----------|-----------|
+| Fused attention | Triton (FA-2 style) | CUDA C++ | fp16 / bf16 (fp8 wired in dtype helper) | yes | matches torch SDPA on H100; GQA-prefill wins at long context. Pure-attention vs FA2 trails at short seq. |
+| Paged KV cache (append / lookup / scatter) | Triton | CUDA C++ | fp16 / bf16 | no (memory-bound) | matches torch indexing baseline (memory-bound) |
+| Fused Linear + LayerNorm / RMSNorm | Triton | CUDA C++ | fp16 / bf16 / fp32 | yes (BLOCK_M, BLOCK_K) | wins on small-batch decode at Llama hidden=4096 due to HBM saving; can trail `F.linear + F.layer_norm` at large batch where the matmul cost dominates. |
+| Online softmax | Triton | CUDA C++ | fp16 / bf16 / fp32 | yes (BLOCK_N) | matches `F.softmax` on long rows; ~par on short rows. |
+| RoPE (apply / apply\_) | Triton | CUDA C++ | fp16 / bf16 / fp32 | no | matches torch elementwise reference. |
 
 Cross-vendor:
 
-* **ROCm**: `kernels/_rocm/` reports gfx version, LDS budget, and a
-  per-generation `BLOCK_N` cap. The existing Triton kernels run unchanged.
-* **Apple MPS / ANE**: `kernels/_mps/` ports the softmax kernel via Metal
-  Performance Shaders and Core ML for a Neural Engine demonstration.
+* **ROCm**: `kernels/_rocm/` reports gfx version (parsed from
+  `torch.cuda.get_device_properties(0).gcnArchName`, not the marketing
+  device name) and a per-generation `BLOCK_N` cap that the attention
+  autotune list now filters through at import time. The Triton kernels
+  use the same source; in theory they run on MI200/MI300 via the Triton
+  hip backend but we have not validated on AMD hardware yet — expected
+  to work, not asserted.
+* **Apple MPS / ANE**: `kernels/_mps/` exposes a softmax dispatcher. The
+  `mps_softmax` path is a thin wrapper around `F.softmax` on the `mps`
+  device — NOT a custom Metal shader; we don't gain by reimplementing
+  what torch already lowers to Metal. The Core ML / ANE path is
+  benchmark-only (per-call dispatch overhead).
 
 ## 1. Fused attention
 
@@ -50,7 +66,9 @@ out = fused_attention(q, k, v, backend="torch")   # SDPA reference
 ```
 
 Parity: `tests/test_attention_parity.py` matches `F.scaled_dot_product_attention`
-within `5e-3` (fp16) / `1e-2` (bf16) absolute.
+within `5e-3` (fp16) / `1e-2` (bf16) absolute, which is the documented
+production tolerance for half-precision attention (see
+`kernels/_common/dtype.py::TOLERANCE`).
 
 ## 2. Paged KV cache
 
@@ -152,14 +170,24 @@ Triton has no Apple backend. `kernels/_mps/` ports the softmax kernel via:
 
 ## Numerical tolerances
 
-| dtype | absolute | relative |
-|-------|---------:|---------:|
-| fp32  | 1e-5     | 1e-5     |
-| fp16  | 1e-3     | 1e-3     |
-| bf16  | 2e-2     | 2e-2     |
+These are the absolute/relative tolerances actually enforced in
+`tests/`. They are scaled up vs the dtype's epsilon to account for
+reduction-tree differences (fused vs separate ops) and the larger
+accumulators. Half-precision tolerances are larger than fp32 because the
+final cast (fp32 accumulator → fp16/bf16 output) lossily rounds.
 
-Defined in `kernels/_common/dtype.py::TOLERANCE`. Parity tests scale these
-by 1-5x depending on the kernel's reduction tree depth.
+| dtype | absolute | enforced in |
+|-------|---------:|-------------|
+| fp32  | 1e-5     | softmax, RoPE, dispatch parity |
+| fp16  | 5e-3     | fused attention, fused linear+norm |
+| bf16  | 1e-2     | fused attention, fused linear+norm |
+
+The defaults in `kernels/_common/dtype.py::TOLERANCE` are stricter
+(fp16=1e-3, bf16=2e-2); the per-kernel tests override them when the
+kernel's reduction tree is deeper than the reference path (e.g. attention
+accumulates over the full K axis in fp32 before the final cast). A future
+version may move the per-kernel overrides into `TOLERANCE` itself; until
+then, the test files are the source of truth.
 
 ## Roadmap
 

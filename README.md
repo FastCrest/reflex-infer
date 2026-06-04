@@ -103,10 +103,18 @@ target_link_libraries(app PRIVATE reflex::infer)
 
 ## Python kernel library
 
-In addition to the standalone CUDA targets above, `reflex-infer` ships a
-cross-vendor production Python kernel library used by Reflex Cloud's
-deterministic-mode runtime. See [KERNELS.md](KERNELS.md) for the per-kernel
-reference. Public surface:
+In addition to the standalone CUDA targets above, `reflex-infer` ships an
+early cross-vendor Python kernel library used by Reflex Cloud's
+deterministic-mode runtime. Honest status: this is a v1 kernel set with
+on-going optimization work. Some kernels currently match or trail torch
+baselines on specific shape ranges (`torch.nn.functional` routes to
+FlashAttention-2 on Ampere+, which is a strong baseline). See
+[KERNELS.md](KERNELS.md) for per-kernel notes on where each path is
+expected to win, match, or trail torch / SDPA. We add benchmark JSON for
+each shape sweep we run; if a kernel does not beat the torch baseline we
+document that rather than hide it.
+
+Public surface:
 
 ```python
 from kernels.attention import fused_attention

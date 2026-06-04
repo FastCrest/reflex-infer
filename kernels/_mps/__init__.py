@@ -11,21 +11,19 @@ Triton has no Apple backend. The two practical Apple paths are:
    compiler producing an .mlpackage that runs on the Neural Engine block.
    No torch hook; you compile a model graph offline.
 
-For the v1 cross-vendor proof we port the softmax kernel, since it's the
-smallest standalone kernel that exercises the Reflex Cloud deterministic
-mode contract (numerically stable, dtype-aware) and verifies the wrapper
-selection logic works without a Triton path.
+HONEST FRAMING: :func:`mps_softmax` is a thin wrapper around
+``torch.nn.functional.softmax`` running on the ``mps`` device. It is NOT a
+custom Metal shader we authored — torch's MPS softmax is already a Metal
+kernel and writing our own buys nothing unless we fuse it with other ops.
+We expose this function so the dispatcher has a working MPS path for the
+deterministic-mode parity tests; if a future fused metal kernel is needed
+it will live as a separate ``mps_fused_*`` entry point.
 
-Two implementations:
-
-* :func:`mps_softmax` - uses ``torch.nn.functional.softmax`` on an MPS
-  tensor. We treat this as our "MPS-native" path because torch's softmax
-  is already implemented as a Metal kernel; we don't gain by writing our
-  own metal shader unless we're fusing.
-* :func:`coreml_softmax` - compiles a tiny Core ML model on first call and
-  runs it via ``coremltools``. This is the ANE-resident path. We expose it
-  as a benchmark-only target because the per-call dispatch overhead makes
-  it impractical for fine-grained kernel use.
+:func:`coreml_softmax` is benchmark-only because per-call Core ML dispatch
+overhead dominates at the kernel granularity we care about. It compiles a
+tiny softmax program once per (shape, dtype) and runs it on the ANE; useful
+for proving the cross-vendor wrapper selection works end-to-end and for
+isolated per-op throughput measurement, not for inner-loop kernel use.
 
 Both are guarded behind ``has_mps()`` / ``has_coreml()`` so the module
 imports cleanly on non-Apple hosts.
@@ -65,7 +63,11 @@ def mps_softmax(
     is_causal: bool = False,
     log: bool = False,
 ) -> torch.Tensor:
-    """Run softmax on an MPS tensor.
+    """Run softmax on an MPS tensor via ``torch.nn.functional.softmax``.
+
+    Not a custom kernel: this is a torch wrapper. See the module docstring
+    for why we don't ship a hand-written Metal shader here. Exposed so the
+    cross-vendor dispatcher has a working Apple GPU path.
 
     The input is moved to ``mps`` if it's not there yet, then back to the
     original device on return. For benchmark fidelity callers should already

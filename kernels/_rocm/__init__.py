@@ -34,6 +34,25 @@ class RocmCapability:
     recommended_block_n: int  # Tuned cap for attention kernel
 
 
+def _parse_gfx(arch_name: str, device_name: str) -> int:
+    """Parse the AMD gfx number from gcnArchName or fall back to device name.
+
+    `gcnArchName` is the canonical source: torch exposes it on
+    ``torch.cuda.get_device_properties(0)`` for ROCm builds. Values look like
+    ``"gfx942"``, ``"gfx90a"``, etc. We prefer it over the marketing name
+    (``"AMD Instinct MI300X"``) because the marketing name doesn't include
+    the gfx token at all.
+    """
+    candidates = (arch_name or "").lower().split() + (device_name or "").lower().split()
+    for token in candidates:
+        if token.startswith("gfx"):
+            try:
+                return int(token[3:].rstrip("acx"))
+            except ValueError:
+                continue
+    return 0
+
+
 def detect_rocm() -> Optional[RocmCapability]:
     """Return a :class:`RocmCapability` if we're running on ROCm, else None."""
     if not torch.cuda.is_available():
@@ -42,13 +61,16 @@ def detect_rocm() -> Optional[RocmCapability]:
     if not is_rocm:
         return None
     name = torch.cuda.get_device_name(0)
-    gfx = 0
-    for token in name.lower().split():
-        if token.startswith("gfx"):
-            try:
-                gfx = int(token[3:].rstrip("acx"))
-            except ValueError:
-                pass
+    # Prefer gcnArchName from device properties; the marketing device name
+    # (e.g. "AMD Instinct MI300X") does NOT contain a gfx token so the
+    # previous parser silently fell through to gfx=0 on real hardware.
+    arch_name = ""
+    try:
+        props = torch.cuda.get_device_properties(0)
+        arch_name = getattr(props, "gcnArchName", "") or ""
+    except Exception:
+        arch_name = ""
+    gfx = _parse_gfx(arch_name, name)
 
     # Hard-coded LDS budgets per gfx generation. Sourced from the AMD ISA
     # docs (MI300: 64KB per CU pair, MI250: 64KB per CU, MI100: 64KB per CU).
